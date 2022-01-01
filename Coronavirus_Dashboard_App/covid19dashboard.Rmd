@@ -1,0 +1,156 @@
+---
+title: "covid19dashboard"
+author: "Developed by Sejal Ghate"
+output: flexdashboard::flex_dashboard
+runtime: shiny
+---
+
+```{r global, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(ggplot2)
+library(plotly)
+library(viridis)
+library(hrbrthemes)
+library(maps)
+dat_c <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv") %>% dplyr::rename(Country = `Country/Region`)
+                
+dat_d <- read_csv("https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv") %>% dplyr::rename(Country = `Country/Region`)
+
+dat_r <- read_csv("https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv")  %>% dplyr::rename(Country = `Country/Region`)
+
+#Plotting data
+dat_lat_lon <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv") %>% dplyr::rename(Country = `Country/Region`) %>% select(Country,Lat,Long) %>% filter(Country %in% c('India','Italy','Spain', 'Brazil'))
+
+# Remove the columns that have an na component
+dat_c <- dat_c[ , colSums(!is.na(dat_c)) == nrow(dat_c), with=FALSE]
+dat_r <- dat_r[ , colSums(!is.na(dat_r)) == nrow(dat_r), with=FALSE]
+dat_d <- dat_d[ , colSums(!is.na(dat_d)) == nrow(dat_d), with=FALSE]
+
+
+# filter out only the required countries
+
+dat_c = dat_c %>% filter(Country %in% c('India','Italy','Spain', 'Brazil')) %>% drop_na()
+dat_r = dat_r %>% filter(Country %in% c('India','Italy','Spain', 'Brazil')) %>% drop_na()
+dat_d = dat_d %>% filter(Country %in% c('India','Italy','Spain', 'Brazil')) %>% drop_na()
+
+
+dat_c1 = dat_c %>% pivot_longer(!Country, names_to = "Date", values_to = "Value")
+dat_r1 = dat_r %>% pivot_longer(!Country, names_to = "Date", values_to = "Value")
+dat_d1 = dat_d %>% pivot_longer(!Country, names_to = "Date", values_to = "Value")
+
+dat_c1$Date=as.Date(dat_c1$Date, format = "%m/%d/%y")
+dat_r1$Date=as.Date(dat_r1$Date, format = "%m/%d/%y")
+dat_d1$Date=as.Date(dat_d1$Date, format = "%m/%d/%y")
+
+dat_lat_lon = read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv") %>% dplyr::rename(Country = `Country/Region`) %>% select(Country,Lat,Long,tail(names(.),1)) %>% filter(Country %in% c('India','Italy','Spain', 'Brazil'))
+
+names(dat_lat_lon)[ncol(dat_lat_lon)] <- "Cases"
+
+```
+
+
+Input {data-width=200}
+-----------------------------------------------------------------------
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+selectizeInput("Num_countries",label=h4("Select the required countries"),
+            choices=c('Italy','India','Brazil','Spain'),selected='India',multiple=T)
+
+selectInput("scale",label=h4("Select the required Scale"),
+            choices=c('Raw Scale','Natural Log'),selected = 'Raw Scale')
+
+radioButtons('smooth',label=h4('Do you want a smoothed time series?'),choices=c('Yes','No'), selected = 'No')
+
+radioButtons('data',label=h4('Select data'),choices=c('Total cases','Deaths','Recoveries'), selected = 'Total cases')
+
+radioButtons('time',label=h4('Plot from:'),choices=c('Time from calender date','Time since first case'), selected = 'Time since first case')
+
+dateRangeInput("dates", label = h3("Date range"),format = "mm-dd-yyyy", start = "2021-01-01",
+               end = "2021-03-20")
+
+
+```
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Graph
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+
+renderPlotly({
+  
+  if(input$data == 'Total cases'){df = dat_c1
+  }else if(input$data == 'Deaths'){df = dat_d1
+  }else(df = dat_r1) 
+  
+
+  if(input$time == 'Time from calender date'){df = filter(df, between(Date,  input$dates[1],  input$dates[2]))}else if(input$time == 'Time since first case'){df = filter(df, Value > 0)}
+  
+  df = filter(df, Country %in% input$Num_countries)
+  
+ time_series = (ggplot(df,aes(x=Date, y=Value, colour= Country)) + 
+                geom_line() +
+                  labs(title = "Time Series of Cases", x = "Date", y = "Number of Cases") +
+        theme(plot.title = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20)))
+
+
+ if(input$scale == 'Natural Log'){time_series = time_series + scale_y_continuous(trans = "log")
+        }else(time_series = time_series)
+
+ # if(input$smooth == 'Yes'){time_series = time_series + geom_smooth(method = "glm", formula = y~x, family = gaussian(link = 'log'))}else{time_series = time_series}
+  if(input$smooth == 'Yes'){time_series = time_series + geom_smooth()}else{time_series = time_series}
+
+  
+  ggplotly(time_series)
+
+})
+
+
+```
+
+### Map
+
+
+
+```{r}
+
+
+
+renderPlot({
+  
+  df_lat = reactive({filter(dat_lat_lon, Country %in% input$Num_countries)})
+
+  # mybreaks <- reactive(c(1, 20, 100, 1000, 50000))
+
+  
+  ggplot() +
+    geom_polygon(data = map_data("world"), mapping = aes(x=long, y = lat, group = group), fill="grey", alpha=0.9)+
+    geom_point(df_lat(), mapping = aes(x=Long, y=Lat, size=`Cases`, color=`Cases`),stroke=F, alpha=20.7) + 
+    scale_size(range=c(1,5)) +
+    # scale_size_continuous() +
+    # scale_colour_viridis_d() +
+    scale_fill_viridis(discrete=TRUE, guide=FALSE, option="A") +
+    # theme_ipsum() +
+    theme(legend.position="bottom") +
+    ylab("Latitude") +
+    xlab("Longitude") +
+    theme(legend.position = "none") +
+    labs(title = 'World map displaying cases',size = 20)
+
+  
+    
+    # ggplotly(map_plot)
+
+  
+})
+
+
+```
